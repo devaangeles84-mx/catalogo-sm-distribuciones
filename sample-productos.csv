@@ -1,0 +1,8 @@
+idProducto,producto,descripcion,categoria,precio,inventario,estatus,imagen1Url,imagen2Url,imagen3Url,driveFileId1,driveFileId2,driveFileId3,fechaAlta,fechaActualizacion
+PROD-001,Soporte metalico manubrio Pro,Soporte firme para celular con ajuste al manubrio,Soportes,95,18,Activo,./assets/products/soporte-manubrio-pro-1.png,./assets/products/soporte-manubrio-pro-2.png,./assets/products/soporte-cargador-manubrio.png,,,,2026-07-01,2026-07-01
+PROD-002,Soporte metalico manubrio Pro compacto,Modelo compacto para manubrio con giro ajustable,Soportes,89,24,Activo,./assets/products/soporte-manubrio-pro-2.png,,,,,,2026-07-01,2026-07-01
+PROD-003,Soporte metalico para manubrio con cargador,Incluye conexion para carga y base reforzada,Soportes con carga,99,11,Activo,./assets/products/soporte-cargador-manubrio.png,,,,,,2026-07-01,2026-07-01
+PROD-004,Soporte metalico para retrovisor con cargador,Base para retrovisor con cargador integrado,Soportes con carga,99,9,Activo,./assets/products/soporte-retrovisor-cargador.png,,,,,,2026-07-01,2026-07-01
+PROD-005,Soporte para celular con sombrilla ajuste retrovisor,Protege la pantalla del sol y se ajusta al retrovisor,Accesorios,89,14,Activo,./assets/products/soporte-sombrilla-retrovisor.png,./assets/products/soporte-sombrilla-manubrio.png,,,,,2026-07-01,2026-07-01
+PROD-006,Soporte para celular con sombrilla manubrio,Soporte con cubierta tipo sombrilla para manubrio,Accesorios,90,0,Sin stock,./assets/products/soporte-sombrilla-manubrio.png,,,,,,2026-07-01,2026-07-01
+PROD-007,Soporte para celular con casco ajuste retrovisor,Base con proteccion para uso en moto o bicicleta,Accesorios,89,7,Activo,./assets/products/soporte-casco-retrovisor.png,,,,,,2026-07-01,2026-07-01

@@ -1,0 +1,2 @@
+folio,fechaPedido,clienteNombre,clienteTelefono,clienteCorreo,itemsJson,piezasTotales,montoTotal,estatusPedido,fechaSurtido,notasAdmin,fechaActualizacion
+PED-20260701-0001,2026-07-01T10:20:00,Distribuidora Demo,3330000000,compras@example.com,"[{""idProducto"":""PROD-001"",""producto"":""Soporte metalico manubrio Pro"",""cantidad"":3,""precio"":95,""subtotal"":285},{""idProducto"":""PROD-003"",""producto"":""Soporte metalico para manubrio con cargador"",""cantidad"":2,""precio"":99,""subtotal"":198}]",5,483,Nuevo,,,2026-07-01T10:20:00
