@@ -282,8 +282,8 @@ function obtenerDashboard(payload) {
   const month = Number(payload.month) || now.getMonth() + 1;
   const orders = readObjects(SHEETS.pedidos);
   const selected = orders.filter((order) => {
-    const date = new Date(order.fechaPedido);
-    return date.getFullYear() === year && date.getMonth() + 1 === month;
+    const date = parseSheetDate(order.fechaPedido);
+    return date && date.getFullYear() === year && date.getMonth() + 1 === month;
   });
   const totalPedidos = selected.length;
   const montoTotal = selected.reduce((sum, order) => sum + Number(order.montoTotal || 0), 0);
@@ -299,8 +299,8 @@ function obtenerDashboard(payload) {
     const label = Utilities.formatDate(date, Session.getScriptTimeZone(), "MMM");
     const monto = orders
       .filter((order) => {
-        const orderDate = new Date(order.fechaPedido);
-        return orderDate.getFullYear() === date.getFullYear() && orderDate.getMonth() === date.getMonth();
+        const orderDate = parseSheetDate(order.fechaPedido);
+        return orderDate && orderDate.getFullYear() === date.getFullYear() && orderDate.getMonth() === date.getMonth();
       })
       .reduce((sum, order) => sum + Number(order.montoTotal || 0), 0);
     monthlyBars.push({ label, monto });
@@ -317,6 +317,30 @@ function obtenerDashboard(payload) {
       orders: selected
     }
   };
+}
+
+function parseSheetDate(value) {
+  if (!value) return null;
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value.getTime())) return value;
+
+  const direct = new Date(value);
+  if (!isNaN(direct.getTime())) return direct;
+
+  const text = String(value).trim().toLowerCase();
+  const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:,\s*|\s+)?(\d{1,2})?:?(\d{2})?\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)?/);
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const year = Number(match[3].length === 2 ? "20" + match[3] : match[3]);
+  let hour = Number(match[4] || 0);
+  const minute = Number(match[5] || 0);
+  const meridian = String(match[6] || "").replace(/\s+/g, "");
+  if ((meridian === "p.m." || meridian === "pm") && hour < 12) hour += 12;
+  if ((meridian === "a.m." || meridian === "am") && hour === 12) hour = 0;
+
+  const date = new Date(year, month, day, hour, minute);
+  return isNaN(date.getTime()) ? null : date;
 }
 
 function getSheet(config) {
