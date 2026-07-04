@@ -135,8 +135,12 @@ function subirImagenProducto(payload) {
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   return {
     fileId: file.getId(),
-    url: "https://drive.google.com/uc?export=view&id=" + file.getId()
+    url: driveImageUrl(file.getId())
   };
+}
+
+function driveImageUrl(fileId) {
+  return "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w1000";
 }
 
 function crearPedido(payload) {

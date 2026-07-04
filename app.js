@@ -314,7 +314,7 @@ function renderProductCard(product) {
     <article class="product-card">
       <div class="product-media">
         ${outOfStock ? `<span class="badge stock-badge">Sin stock</span>` : ""}
-        <img src="${escapeAttr(images[0] || PLACEHOLDER_IMAGE)}" alt="${escapeAttr(product.producto)}" />
+        <img src="${escapeAttr(images[0] || PLACEHOLDER_IMAGE)}" alt="${escapeAttr(product.producto)}" onerror="this.onerror=null;this.src='${PLACEHOLDER_IMAGE}'" />
       </div>
       <div class="product-body">
         <span class="badge">${escapeHtml(product.categoria || "General")}</span>
@@ -399,7 +399,7 @@ function renderGalleryModal() {
           <button class="icon-button" type="button" data-action="close-gallery" aria-label="Cerrar galeria">×</button>
         </div>
         <div class="gallery-stage">
-          ${image ? `<img class="${gallery.zoomed ? "zoomed" : ""}" src="${escapeAttr(image)}" alt="${escapeAttr(gallery.title)}" />` : ""}
+          ${image ? `<img class="${gallery.zoomed ? "zoomed" : ""}" src="${escapeAttr(image)}" alt="${escapeAttr(gallery.title)}" onerror="this.onerror=null;this.src='${PLACEHOLDER_IMAGE}'" />` : ""}
         </div>
         <div class="gallery-controls">
           <button class="secondary-button" type="button" data-action="prev-gallery">Anterior</button>
@@ -450,7 +450,9 @@ function handleGlobalClick(event) {
 }
 
 function getProductImages(product) {
-  return [product.imagen1Url, product.imagen2Url, product.imagen3Url].filter(Boolean);
+  return [product.imagen1Url, product.imagen2Url, product.imagen3Url]
+    .map(normalizeProductImageUrl)
+    .filter(Boolean);
 }
 
 function addToCart(id) {
@@ -1195,10 +1197,31 @@ function normalizeProduct(product = {}) {
     precio: Number(product.precio) || 0,
     inventario: Number(product.inventario) || 0,
     estatus: normalizeDisplayStatus(product.estatus),
-    imagen1Url: String(product.imagen1Url || "").trim(),
-    imagen2Url: String(product.imagen2Url || "").trim(),
-    imagen3Url: String(product.imagen3Url || "").trim()
+    imagen1Url: normalizeProductImageUrl(product.imagen1Url),
+    imagen2Url: normalizeProductImageUrl(product.imagen2Url),
+    imagen3Url: normalizeProductImageUrl(product.imagen3Url)
   };
+}
+
+function normalizeProductImageUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  const driveFileId = extractGoogleDriveFileId(url);
+  if (driveFileId) return `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1000`;
+  return url;
+}
+
+function extractGoogleDriveFileId(url) {
+  if (!/drive\.google\.com|googleusercontent\.com/.test(url)) return "";
+  const filePathMatch = url.match(/\/file\/d\/([^/]+)/);
+  if (filePathMatch) return filePathMatch[1];
+  const directPathMatch = url.match(/\/(?:uc|thumbnail)\?(?:[^#]*&)?id=([^&#]+)/);
+  if (directPathMatch) return directPathMatch[1];
+  try {
+    return new URL(url).searchParams.get("id") || "";
+  } catch {
+    return "";
+  }
 }
 
 function normalizeId(value) {
