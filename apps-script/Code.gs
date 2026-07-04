@@ -23,6 +23,15 @@ const SHEETS = {
   }
 };
 
+function doGet() {
+  ensureSetup();
+  return json({
+    ok: true,
+    service: "Catalogo SM Distribuciones API",
+    message: "API activa. Las acciones del catalogo se envian por POST desde Netlify Functions."
+  });
+}
+
 function doPost(e) {
   try {
     const request = JSON.parse(e.postData.contents || "{}");
@@ -63,12 +72,13 @@ function ensureSetup() {
 
 function listarProductosPublicos() {
   const products = readObjects(SHEETS.productos)
-    .filter((product) => ["Activo", "Sin stock"].indexOf(product.estatus) >= 0);
+    .map(normalizeProduct)
+    .filter((product) => isPublicProduct(product));
   return { products };
 }
 
 function listarProductosAdmin() {
-  return { products: readObjects(SHEETS.productos) };
+  return { products: readObjects(SHEETS.productos).map(normalizeProduct) };
 }
 
 function crearProducto(payload) {
@@ -76,6 +86,7 @@ function crearProducto(payload) {
   const product = normalizeProduct({
     ...payload,
     idProducto: payload.idProducto || createProductId(),
+    producto: required(payload.producto, "producto"),
     fechaAlta: now,
     fechaActualizacion: now
   });
@@ -96,7 +107,7 @@ function crearProducto(payload) {
 
 function actualizarProducto(payload) {
   const products = readObjects(SHEETS.productos);
-  const current = products.find((product) => product.idProducto === payload.idProducto);
+  const current = products.find((product) => normalizeId(product.idProducto) === normalizeId(payload.idProducto));
   if (!current) throw new Error("Producto no encontrado");
   const updated = normalizeProduct({
     ...current,
@@ -109,7 +120,8 @@ function actualizarProducto(payload) {
 }
 
 function eliminarProducto(payload) {
-  return actualizarProducto({ idProducto: payload.idProducto, estatus: "Eliminado" });
+  const result = actualizarProducto({ idProducto: payload.idProducto, estatus: "Eliminado" });
+  return { ok: true, product: result.product };
 }
 
 function subirImagenProducto(payload) {
@@ -157,13 +169,13 @@ function listarPedidosAdmin() {
 }
 
 function obtenerPedidoPorFolio(payload) {
-  const order = readObjects(SHEETS.pedidos).find((item) => item.folio === payload.folio);
+  const order = readObjects(SHEETS.pedidos).find((item) => normalizeId(item.folio) === normalizeId(payload.folio));
   return { order: order || null };
 }
 
 function actualizarPedido(payload) {
   const orders = readObjects(SHEETS.pedidos);
-  const current = orders.find((order) => order.folio === payload.folio);
+  const current = orders.find((order) => normalizeId(order.folio) === normalizeId(payload.folio));
   if (!current) throw new Error("Pedido no encontrado");
   if (current.estatusPedido === "Surtido" && payload.estatusPedido !== "Surtido") {
     throw new Error("No se puede regresar un pedido ya surtido");
@@ -187,14 +199,14 @@ function actualizarPedido(payload) {
 
 function marcarPedidoSurtido(payload) {
   const orders = readObjects(SHEETS.pedidos);
-  const order = orders.find((item) => item.folio === payload.folio);
+  const order = orders.find((item) => normalizeId(item.folio) === normalizeId(payload.folio));
   if (!order) throw new Error("Pedido no encontrado");
   if (order.estatusPedido === "Surtido") throw new Error("Este pedido ya fue surtido");
 
   const items = parseJson(order.itemsJson, []);
   const products = readObjects(SHEETS.productos);
   items.forEach((item) => {
-    const product = products.find((candidate) => candidate.idProducto === item.idProducto);
+    const product = products.find((candidate) => normalizeId(candidate.idProducto) === normalizeId(item.idProducto));
     if (!product) throw new Error("Producto no encontrado: " + item.producto);
     if (Number(product.inventario) < Number(item.cantidad)) {
       throw new Error("Inventario insuficiente para " + product.producto);
@@ -203,7 +215,7 @@ function marcarPedidoSurtido(payload) {
 
   const now = new Date().toISOString();
   items.forEach((item) => {
-    const product = products.find((candidate) => candidate.idProducto === item.idProducto);
+    const product = products.find((candidate) => normalizeId(candidate.idProducto) === normalizeId(item.idProducto));
     const before = Number(product.inventario) || 0;
     const after = before - Number(item.cantidad);
     product.inventario = after;
@@ -234,7 +246,7 @@ function marcarPedidoSurtido(payload) {
 
 function ajustarInventarioManual(payload) {
   const products = readObjects(SHEETS.productos);
-  const product = products.find((item) => item.idProducto === payload.idProducto);
+  const product = products.find((item) => normalizeId(item.idProducto) === normalizeId(payload.idProducto));
   if (!product) throw new Error("Producto no encontrado");
 
   const before = Number(product.inventario) || 0;
@@ -322,11 +334,15 @@ function readObjects(config) {
   const sheet = getSheet(config);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  const values = sheet.getRange(2, 1, lastRow - 1, config.headers.length).getValues();
+  const lastColumn = Math.max(sheet.getLastColumn(), config.headers.length);
+  const headerRow = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const headerMap = buildHeaderMap(headerRow);
+  const values = sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues();
   return values.map((row, index) => {
     const object = { _rowNumber: index + 2 };
     config.headers.forEach((header, column) => {
-      object[header] = row[column];
+      const mappedColumn = headerMap[normalizeHeader(header)];
+      object[header] = mappedColumn === undefined ? row[column] : row[mappedColumn];
     });
     return object;
   });
@@ -347,15 +363,81 @@ function appendInventoryMovement(movement) {
   appendObject(SHEETS.movimientos, movement);
 }
 
+function buildHeaderMap(headerRow) {
+  const map = {};
+  headerRow.forEach((header, index) => {
+    const normalized = normalizeHeader(header);
+    if (normalized) map[normalized] = index;
+  });
+  return map;
+}
+
+function normalizeHeader(value) {
+  const normalized = normalizeSearch(value).replace(/[^a-z0-9]/g, "");
+  const aliases = {
+    idproducto: "idproducto",
+    id: "idproducto",
+    producto: "producto",
+    nombre: "producto",
+    descripcion: "descripcion",
+    categoria: "categoria",
+    precio: "precio",
+    inventario: "inventario",
+    stock: "inventario",
+    estatus: "estatus",
+    status: "estatus",
+    estado: "estatus",
+    imagen1url: "imagen1url",
+    imagen2url: "imagen2url",
+    imagen3url: "imagen3url",
+    drivefileid1: "drivefileid1",
+    drivefileid2: "drivefileid2",
+    drivefileid3: "drivefileid3",
+    fechaalta: "fechaalta",
+    fechaactualizacion: "fechaactualizacion"
+  };
+  return aliases[normalized] || normalized;
+}
+
+function normalizeSearch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeId(value) {
+  return String(value || "").trim();
+}
+
+function normalizeStatus(value) {
+  return normalizeSearch(value);
+}
+
+function normalizeDisplayStatus(value) {
+  const normalized = normalizeStatus(value);
+  if (normalized === "activo") return "Activo";
+  if (normalized === "sin stock" || normalized === "sinstock" || normalized === "sin existencia") return "Sin stock";
+  if (normalized === "en pausa" || normalized === "pausado") return "En pausa";
+  if (normalized === "eliminado") return "Eliminado";
+  return String(value || "Activo").trim() || "Activo";
+}
+
+function isPublicProduct(product) {
+  const status = normalizeStatus(product.estatus);
+  return (status === "activo" || status === "sin stock") && Boolean(product.producto || product.idProducto);
+}
+
 function normalizeProduct(payload) {
   return {
-    idProducto: required(payload.idProducto, "idProducto"),
-    producto: required(payload.producto, "producto"),
+    idProducto: normalizeId(payload.idProducto || payload.id || payload.ID),
+    producto: String(payload.producto || payload.Producto || "").trim(),
     descripcion: payload.descripcion || "",
     categoria: payload.categoria || "General",
     precio: Number(payload.precio) || 0,
     inventario: Number(payload.inventario) || 0,
-    estatus: payload.estatus || "Activo",
+    estatus: normalizeDisplayStatus(payload.estatus || payload.status || payload.estado || "Activo"),
     imagen1Url: payload.imagen1Url || "",
     imagen2Url: payload.imagen2Url || "",
     imagen3Url: payload.imagen3Url || "",

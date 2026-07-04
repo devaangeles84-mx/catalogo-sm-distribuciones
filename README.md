@@ -75,6 +75,8 @@ fecha, idProducto, producto, tipoMovimiento, cantidad, inventarioAnterior, inven
 
 El token evita que la Web App acepte acciones si no vienen desde tu funcion de Netlify.
 
+Si abres la URL `/exec` directamente en el navegador, debe responder que la API esta activa. Las acciones reales del catalogo se envian por POST desde Netlify Functions.
+
 ## Configurar Netlify
 
 En Netlify, en `Site configuration > Environment variables`, agrega:

@@ -702,6 +702,16 @@ img {
   gap: 12px;
 }
 
+.admin-alert {
+  border: 1px solid #f3d2a8;
+  border-left: 5px solid #ef9d45;
+  background: #fff8ed;
+  color: #6d4217;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-weight: 700;
+}
+
 .admin-title {
   display: flex;
   align-items: center;

@@ -11,6 +11,8 @@ const LOCAL_DEMO_ADMIN = {
   token: "local-demo-admin"
 };
 
+const PLACEHOLDER_IMAGE = "./assets/products/placeholder-product.svg";
+
 const currency = new Intl.NumberFormat("es-MX", {
   style: "currency",
   currency: "MXN"
@@ -152,7 +154,10 @@ let state = {
     movements: [],
     selectedProduct: null,
     selectedOrder: null,
-    dashboard: null
+    dashboard: null,
+    loaded: false,
+    loading: false,
+    error: ""
   }
 };
 
@@ -178,17 +183,17 @@ async function loadPublicConfig() {
 
 async function loadPublicProducts() {
   const result = await callApi("listarProductosPublicos", {}, { quiet: true });
-  state.products = Array.isArray(result?.products) ? result.products : SAMPLE_PRODUCTS;
+  state.products = normalizeProducts(Array.isArray(result?.products) ? result.products : SAMPLE_PRODUCTS);
   applyPublicFilters();
 }
 
 function applyPublicFilters() {
-  const search = document.querySelector("#search")?.value?.trim().toLowerCase() || "";
+  const search = normalizeSearch(document.querySelector("#search")?.value || "");
   const category = document.querySelector("#category")?.value || "Todas";
   state.filteredProducts = state.products
-    .filter((product) => ["Activo", "Sin stock"].includes(product.estatus))
+    .filter((product) => isPublicProduct(product))
     .filter((product) => category === "Todas" || product.categoria === category)
-    .filter((product) => !search || product.producto.toLowerCase().includes(search));
+    .filter((product) => !search || normalizeSearch(product.producto).includes(search));
 }
 
 function render() {
@@ -201,7 +206,7 @@ function render() {
 
 function renderPublic() {
   const categories = ["Todas", ...new Set(state.products
-    .filter((product) => ["Activo", "Sin stock"].includes(product.estatus))
+    .filter((product) => isPublicProduct(product))
     .map((product) => product.categoria)
     .filter(Boolean))];
   const cartCount = cartItems().reduce((sum, item) => sum + item.cantidad, 0);
@@ -304,12 +309,12 @@ function renderPublic() {
 
 function renderProductCard(product) {
   const images = getProductImages(product);
-  const outOfStock = product.estatus === "Sin stock" || Number(product.inventario) <= 0;
+  const outOfStock = isOutOfStock(product);
   return `
     <article class="product-card">
       <div class="product-media">
         ${outOfStock ? `<span class="badge stock-badge">Sin stock</span>` : ""}
-        <img src="${escapeAttr(images[0] || "./assets/products/soporte-manubrio-pro-1.png")}" alt="${escapeAttr(product.producto)}" />
+        <img src="${escapeAttr(images[0] || PLACEHOLDER_IMAGE)}" alt="${escapeAttr(product.producto)}" />
       </div>
       <div class="product-body">
         <span class="badge">${escapeHtml(product.categoria || "General")}</span>
@@ -420,6 +425,7 @@ function bindPublicEvents() {
 }
 
 function handleGlobalClick(event) {
+  if (location.hash === "#admin") return;
   const button = event.target.closest("[data-action]");
   if (!button) {
     document.body.addEventListener("click", handleGlobalClick, { once: true });
@@ -448,9 +454,9 @@ function getProductImages(product) {
 }
 
 function addToCart(id) {
-  const product = state.products.find((item) => item.idProducto === id);
+  const product = findProductById(state.products, id);
   if (!product) return;
-  if (product.estatus === "Sin stock" || Number(product.inventario) <= 0) {
+  if (isOutOfStock(product)) {
     showToast("Producto sin stock");
     return;
   }
@@ -497,7 +503,7 @@ function saveCart() {
 }
 
 function openGallery(id) {
-  const product = state.products.find((item) => item.idProducto === id);
+  const product = findProductById(state.products, id);
   if (!product) return;
   state.gallery = {
     open: true,
@@ -615,6 +621,7 @@ function renderAdmin() {
             `).join("")}
           </div>
         </header>
+        ${state.admin.error ? `<div class="admin-alert">${escapeHtml(state.admin.error)}</div>` : ""}
         ${renderAdminTab()}
       </div>
     </div>
@@ -644,6 +651,12 @@ function renderAdminLogin() {
 }
 
 function renderAdminTab() {
+  if (!state.admin.loaded && !state.admin.error) {
+    return `<section class="panel"><div class="empty-state">Cargando panel administrador...</div></section>`;
+  }
+  if (state.admin.error && !state.admin.loaded) {
+    return `<section class="panel"><div class="empty-state">${escapeHtml(state.admin.error)}</div></section>`;
+  }
   if (state.admin.tab === "productos") return renderProductsAdmin();
   if (state.admin.tab === "pedidos") return renderOrdersAdmin();
   if (state.admin.tab === "inventario") return renderInventoryAdmin();
@@ -686,7 +699,7 @@ function renderDashboardAdmin() {
 
 function renderProductsAdmin() {
   const product = state.admin.selectedProduct || {};
-  const products = state.admin.products.length ? state.admin.products : SAMPLE_PRODUCTS;
+  const products = state.admin.products;
   return `
     <section class="panel">
       <h2>${product.idProducto ? "Editar producto" : "Alta de producto"}</h2>
@@ -723,7 +736,7 @@ function renderProductsAdmin() {
                   <button class="danger-button" type="button" data-admin-action="delete-product" data-id="${escapeAttr(item.idProducto)}">Eliminar</button>
                 </td>
               </tr>
-            `).join("")}
+            `).join("") || `<tr><td colspan="6">No hay productos cargados.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -780,7 +793,7 @@ function renderOrderEditor(order) {
 }
 
 function renderInventoryAdmin() {
-  const products = state.admin.products.length ? state.admin.products : SAMPLE_PRODUCTS;
+  const products = state.admin.products;
   return `
     <section class="panel">
       <h2>Ajuste de inventario</h2>
@@ -861,15 +874,26 @@ function bindAdminEvents() {
 }
 
 async function ensureAdminData() {
-  if (state.admin.products.length) return;
+  if (state.admin.loaded || state.admin.loading) return;
+  await refreshAdminData();
+}
+
+async function refreshAdminData() {
+  state.admin.loading = true;
+  state.admin.error = "";
   const [products, dashboard, orders] = await Promise.all([
     callApi("listarProductosAdmin", {}, { token: state.admin.token, quiet: true }),
     callApi("obtenerDashboard", {}, { token: state.admin.token, quiet: true }),
     callApi("listarPedidosAdmin", {}, { token: state.admin.token, quiet: true })
   ]);
-  state.admin.products = products?.products || SAMPLE_PRODUCTS;
+  state.admin.products = normalizeProducts(products?.products || []);
   state.admin.dashboard = dashboard?.dashboard || buildLocalDashboard(new Date().getFullYear(), new Date().getMonth() + 1);
   state.admin.orders = orders?.orders || [...loadJson(STORAGE_KEYS.demoOrders, []), ...SAMPLE_ORDERS];
+  state.admin.loaded = true;
+  state.admin.loading = false;
+  if (!products?.products) {
+    state.admin.error = "No fue posible cargar productos desde la API. Revisa Netlify Functions y Apps Script.";
+  }
   renderAdmin();
 }
 
@@ -895,6 +919,8 @@ async function handleAdminLogin(event) {
   }
   state.admin.token = response.token;
   sessionStorage.setItem(STORAGE_KEYS.token, response.token);
+  state.admin.loaded = false;
+  state.admin.error = "";
   showToast("Sesion iniciada");
   renderAdmin();
 }
@@ -943,9 +969,11 @@ async function handleProductSave(event) {
   if (response?.product) {
     showToast("Producto guardado");
     state.admin.selectedProduct = null;
-    state.admin.products = [];
+    state.admin.loaded = false;
     await loadPublicProducts();
-    renderAdmin();
+    await refreshAdminData();
+  } else {
+    showToast(response?.error || "No se pudo guardar el producto");
   }
 }
 
@@ -1007,41 +1035,60 @@ async function handleInventoryAdjust(event) {
 }
 
 async function handleAdminAction(event) {
-  const node = event.currentTarget;
+  const node = event.target.closest("[data-admin-action]");
+  if (!node) return;
   const action = node.dataset.adminAction;
   if (action === "logout") {
     state.admin.token = "";
+    state.admin.loaded = false;
+    state.admin.products = [];
+    state.admin.orders = [];
+    state.admin.dashboard = null;
     sessionStorage.removeItem(STORAGE_KEYS.token);
     renderAdmin();
+    return;
   }
   if (action === "tab") {
     state.admin.tab = node.dataset.tab;
     renderAdmin();
+    return;
   }
   if (action === "new-product") {
     state.admin.selectedProduct = null;
     renderAdmin();
+    return;
   }
   if (action === "edit-product") {
-    state.admin.selectedProduct = state.admin.products.find((product) => product.idProducto === node.dataset.id) || null;
+    state.admin.selectedProduct = findProductById(state.admin.products, node.dataset.id);
+    if (!state.admin.selectedProduct) showToast("No se encontro el producto para editar");
     renderAdmin();
+    return;
   }
   if (action === "delete-product") {
-    const response = await callApi("eliminarProducto", { idProducto: node.dataset.id }, { token: state.admin.token });
-    if (response?.ok) {
-      showToast("Producto eliminado logicamente");
-      state.admin.products = [];
-      await loadPublicProducts();
-      renderAdmin();
+    const product = findProductById(state.admin.products, node.dataset.id);
+    if (!product) {
+      showToast("No se encontro el producto para eliminar");
+      return;
     }
+    if (!window.confirm(`Eliminar logicamente "${product.producto}"?`)) return;
+    const response = await callApi("eliminarProducto", { idProducto: node.dataset.id }, { token: state.admin.token });
+    if (response?.ok || response?.product) {
+      showToast("Producto eliminado logicamente");
+      state.admin.loaded = false;
+      await loadPublicProducts();
+      await refreshAdminData();
+    } else {
+      showToast(response?.error || "No se pudo eliminar el producto");
+    }
+    return;
   }
   if (action === "mark-served") {
     const response = await callApi("marcarPedidoSurtido", { folio: node.dataset.folio }, { token: state.admin.token });
     if (response?.order) {
       state.admin.selectedOrder = response.order;
-      state.admin.products = [];
+      state.admin.loaded = false;
       showToast("Pedido surtido e inventario descontado");
-      renderAdmin();
+      await refreshAdminData();
     } else if (response?.error) {
       showToast(response.error);
     }
@@ -1059,9 +1106,13 @@ async function callApi(action, payload = {}, options = {}) {
       body: JSON.stringify(payload)
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok && !options.quiet) showToast(data.error || "La API no respondio correctamente");
+    if (!response.ok && !options.quiet) {
+      console.error("API error", { action, status: response.status, data });
+      showToast(data.error || "La API no respondio correctamente");
+    }
     return data;
   } catch (error) {
+    console.error("Fetch error", { action, error });
     if (!options.quiet) showToast("Usando modo local de demostracion");
     return null;
   }
@@ -1112,7 +1163,7 @@ function labelTab(tab) {
 }
 
 function renderStatusSelect(value, name) {
-  return `<select name="${name}">${["Activo", "En pausa", "Sin stock", "Eliminado"].map((status) => `<option ${status === value ? "selected" : ""}>${status}</option>`).join("")}</select>`;
+  return `<select name="${name}">${["Activo", "En pausa", "Sin stock", "Eliminado"].map((status) => `<option ${normalizeStatus(status) === normalizeStatus(value) ? "selected" : ""}>${status}</option>`).join("")}</select>`;
 }
 
 function renderOrderStatusSelect(value, name) {
@@ -1126,6 +1177,67 @@ function parseItems(itemsJson) {
   } catch {
     return [];
   }
+}
+
+function normalizeProducts(products) {
+  return (products || [])
+    .map((product) => normalizeProduct(product))
+    .filter((product) => product.idProducto || product.producto);
+}
+
+function normalizeProduct(product = {}) {
+  return {
+    ...product,
+    idProducto: normalizeId(product.idProducto),
+    producto: String(product.producto || "").trim(),
+    descripcion: String(product.descripcion || "").trim(),
+    categoria: String(product.categoria || "General").trim() || "General",
+    precio: Number(product.precio) || 0,
+    inventario: Number(product.inventario) || 0,
+    estatus: normalizeDisplayStatus(product.estatus),
+    imagen1Url: String(product.imagen1Url || "").trim(),
+    imagen2Url: String(product.imagen2Url || "").trim(),
+    imagen3Url: String(product.imagen3Url || "").trim()
+  };
+}
+
+function normalizeId(value) {
+  return String(value || "").trim();
+}
+
+function normalizeSearch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeStatus(value) {
+  return normalizeSearch(value);
+}
+
+function normalizeDisplayStatus(value) {
+  const normalized = normalizeStatus(value);
+  if (normalized === "activo") return "Activo";
+  if (normalized === "sin stock" || normalized === "sinstock" || normalized === "sin existencia") return "Sin stock";
+  if (normalized === "en pausa" || normalized === "pausado") return "En pausa";
+  if (normalized === "eliminado") return "Eliminado";
+  return String(value || "Activo").trim() || "Activo";
+}
+
+function isPublicProduct(product) {
+  const status = normalizeStatus(product.estatus);
+  return status === "activo" || status === "sin stock";
+}
+
+function isOutOfStock(product) {
+  return normalizeStatus(product.estatus) === "sin stock" || Number(product.inventario) <= 0;
+}
+
+function findProductById(products, id) {
+  const target = normalizeId(id);
+  return (products || []).find((product) => normalizeId(product.idProducto) === target) || null;
 }
 
 function loadJson(key, fallback) {

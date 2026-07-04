@@ -120,7 +120,7 @@ async function forwardToAppsScript(action, payload) {
 
 function mockResponse(action, payload) {
   if (action === "listarProductosPublicos") {
-    return { products: SAMPLE_PRODUCTS.filter((product) => ["Activo", "Sin stock"].includes(product.estatus)) };
+    return { products: SAMPLE_PRODUCTS.filter((product) => isPublicProduct(product)) };
   }
   if (action === "listarProductosAdmin") {
     return { products: SAMPLE_PRODUCTS };
@@ -159,7 +159,7 @@ function mockResponse(action, payload) {
   if (action === "crearProducto" || action === "actualizarProducto") {
     return { product: { ...payload, idProducto: payload.idProducto || `PROD-${Date.now()}` } };
   }
-  if (action === "eliminarProducto") return { ok: true };
+  if (action === "eliminarProducto") return { ok: true, product: { idProducto: payload.idProducto, estatus: "Eliminado" } };
   if (action === "obtenerPedidoPorFolio") return { order: null };
   if (action === "actualizarPedido") return { order: payload };
   if (action === "marcarPedidoSurtido") return { order: { folio: payload.folio, estatusPedido: "Surtido" } };
@@ -231,6 +231,23 @@ function getBearerToken(event) {
 
 function dateCode(date) {
   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeSearch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeStatus(value) {
+  return normalizeSearch(value);
+}
+
+function isPublicProduct(product) {
+  const status = normalizeStatus(product.estatus);
+  return status === "activo" || status === "sin stock";
 }
 
 function respond(statusCode, body) {
